@@ -527,29 +527,32 @@ const loading = show => document.getElementById('loading').style.display = show 
 // ═══════════════════════════════════════
 // AUTH
 // ═══════════════════════════════════════
-async function doLogin() {
-  const email = document.getElementById('login-email').value.trim();
-  const pwd = document.getElementById('login-pwd').value;
-  const errEl = document.getElementById('login-err');
-  const btn = document.getElementById('login-btn');
-  errEl.style.display = 'none';
-  btn.textContent = 'Connexion…'; btn.disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email, password: pwd });
-  if (error) {
-    errEl.textContent = 'Email ou mot de passe incorrect.';
-    errEl.style.display = 'block';
-    btn.textContent = 'Se connecter'; btn.disabled = false;
-  }
-}
 
-async function doLogout() {
-  appInitialized = false;
-  PRODUITS = []; KITS = []; blsCache = []; achatsCache = []; invsCache = [];
-  cart = {}; nextBLNum = 1;
-  await sb.auth.signOut();
+// ═══════════════════════════════════════
+// REQUETES SUPABASE DIRECTES (sans client JS)
+// ═══════════════════════════════════════
+async function sbFetch(path, options = {}) {
+  const headers = {
+    'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5cG13bnV4b3p3cHlkb3FsYml6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNzYzNDcsImV4cCI6MjA5MTk1MjM0N30.X4ZHa5AGC-WpaIAuZ1EClCatuhzvzwYG70tGHkBILfg',
+    'Authorization': 'Bearer ' + (userToken || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5cG13bnV4b3p3cHlkb3FsYml6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNzYzNDcsImV4cCI6MjA5MTk1MjM0N30.X4ZHa5AGC-WpaIAuZ1EClCatuhzvzwYG70tGHkBILfg'),
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+    ...( options.headers || {})
+  };
+  const resp = await fetch('https://wypmwnuxozwpydoqlbiz.supabase.co/rest/v1/' + path, { ...options, headers });
+  if (!resp.ok) { const e = await resp.text(); throw new Error(e); }
+  return resp.json();
 }
+// ═══════════════════════════════════════
+// AUTH SIMPLE - sans Supabase Auth
+// ═══════════════════════════════════════
+// Identifiants autorisés
+const USERS = [
+  { email: 'yoni@hmgroup.fr', password: 'hmgroup2024' }
+];
 
 let appInitialized = false;
+let userToken = null;
 
 function showLogin() {
   loading(false);
@@ -567,19 +570,61 @@ function showApp() {
   document.getElementById('app-screen').style.display = 'block';
 }
 
-window.addEventListener('load', async () => {
-  // Toujours vider la session au chargement et forcer le login
-  try { localStorage.removeItem('sb-wypmwnuxozwpydoqlbiz-auth-token'); } catch(_) {}
-  try { await sb.auth.signOut(); } catch(_) {}
-  showLogin();
-});
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim().toLowerCase();
+  const pwd = document.getElementById('login-pwd').value;
+  const errEl = document.getElementById('login-err');
+  const btn = document.getElementById('login-btn');
+  errEl.style.display = 'none';
+  btn.textContent = 'Connexion…'; btn.disabled = true;
+  
+  // Vérifier via Supabase Auth API directement en fetch
+  try {
+    const resp = await fetch('https://wypmwnuxozwpydoqlbiz.supabase.co/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5cG13bnV4b3p3cHlkb3FsYml6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNzYzNDcsImV4cCI6MjA5MTk1MjM0N30.X4ZHa5AGC-WpaIAuZ1EClCatuhzvzwYG70tGHkBILfg'
+      },
+      body: JSON.stringify({ email, password: pwd })
+    });
+    const data = await resp.json();
+    if (data.access_token) {
+      userToken = data.access_token;
+      sessionStorage.setItem('hmg_token', userToken);
+      showApp();
+      appInitialized = true;
+      await initApp();
+    } else {
+      errEl.textContent = 'Email ou mot de passe incorrect.';
+      errEl.style.display = 'block';
+      btn.textContent = 'Se connecter'; btn.disabled = false;
+    }
+  } catch(e) {
+    errEl.textContent = 'Erreur de connexion. Réessayez.';
+    errEl.style.display = 'block';
+    btn.textContent = 'Se connecter'; btn.disabled = false;
+  }
+}
 
-sb.auth.onAuthStateChange(async (event, session) => {
-  if (event === 'SIGNED_IN' && !appInitialized) {
+function doLogout() {
+  appInitialized = false;
+  userToken = null;
+  sessionStorage.removeItem('hmg_token');
+  PRODUITS = []; KITS = []; blsCache = []; achatsCache = []; invsCache = [];
+  cart = {}; nextBLNum = 1;
+  showLogin();
+}
+
+// Au chargement : vérifier si token en session
+window.addEventListener('load', () => {
+  const token = sessionStorage.getItem('hmg_token');
+  if (token) {
+    userToken = token;
     showApp();
     appInitialized = true;
-    await initApp();
-  } else if (event === 'SIGNED_OUT') {
+    initApp();
+  } else {
     showLogin();
   }
 });
@@ -606,38 +651,38 @@ async function initApp() {
 }
 
 async function loadProduits() {
-  const { data: prods } = await sb.from('produits').select('*').eq('actif', true).order('entite').order('ref');
-  const { data: lots } = await sb.from('lots_achat').select('*').gt('quantite_restante', 0).order('date_achat');
-  PRODUITS = prods.map(p => ({
+  const prods = await sbFetch('produits?actif=eq.true&order=entite,ref');
+  const lots = await sbFetch('lots_achat?quantite_restante=gt.0&order=date_achat');
+  PRODUITS = (prods || []).map(p => ({
     ...p,
-    lots: lots.filter(l => l.produit_ref === p.ref).sort((a,b) => new Date(a.date_achat) - new Date(b.date_achat))
+    lots: (lots || []).filter(l => l.produit_ref === p.ref).sort((a,b) => new Date(a.date_achat) - new Date(b.date_achat))
   }));
-  const { data: blData } = await sb.from('bons_livraison').select('numero').order('id', {ascending:false}).limit(1);
+  const blData = await sbFetch('bons_livraison?select=numero&order=id.desc&limit=1');
   if (blData && blData.length) {
-    const lastNum = parseInt(blData[0].numero.replace(/\D/g,'')) || 0;
+    const lastNum = parseInt((blData[0].numero || '').replace(/\D/g,'')) || 0;
     nextBLNum = lastNum + 1;
   }
   document.getElementById('kpi-next-bl').textContent = 'N°' + String(nextBLNum).padStart(3,'0');
 }
 
 async function loadKits() {
-  const { data: kits } = await sb.from('kits').select('*, kit_lignes(*)').eq('actif', true);
-  KITS = kits || [];
+  const kits = await sbFetch('kits?actif=eq.true&select=*,kit_lignes(*)');
+  KITS = Array.isArray(kits) ? kits : [];
 }
 
 async function loadBLs() {
-  const { data } = await sb.from('bons_livraison').select('*, lignes_bl(*)').order('date_bl', {ascending:false}).limit(50);
-  blsCache = data || [];
+  const data = await sbFetch('bons_livraison?select=*,lignes_bl(*)&order=date_bl.desc&limit=50');
+  blsCache = Array.isArray(data) ? data : [];
 }
 
 async function loadAchats() {
-  const { data } = await sb.from('lots_achat').select('*').order('date_achat', {ascending:false}).limit(50);
-  achatsCache = data || [];
+  const data = await sbFetch('lots_achat?order=date_achat.desc&limit=50');
+  achatsCache = Array.isArray(data) ? data : [];
 }
 
 async function loadInvs() {
-  const { data } = await sb.from('inventaires').select('*').order('date_inventaire', {ascending:false});
-  invsCache = data || [];
+  const data = await sbFetch('inventaires?order=date_inventaire.desc');
+  invsCache = Array.isArray(data) ? data : [];
 }
 
 // ═══════════════════════════════════════
