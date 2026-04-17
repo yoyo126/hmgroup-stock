@@ -568,19 +568,10 @@ function showApp() {
 }
 
 window.addEventListener('load', async () => {
-  try {
-    const { data: { session } } = await sb.auth.getSession();
-    if (session) {
-      showApp();
-      appInitialized = true;
-      await initApp();
-    } else {
-      showLogin();
-    }
-  } catch(e) {
-    console.error('getSession error:', e);
-    showLogin();
-  }
+  // Toujours vider la session au chargement et forcer le login
+  try { localStorage.removeItem('sb-wypmwnuxozwpydoqlbiz-auth-token'); } catch(_) {}
+  try { await sb.auth.signOut(); } catch(_) {}
+  showLogin();
 });
 
 sb.auth.onAuthStateChange(async (event, session) => {
